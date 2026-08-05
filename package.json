@@ -1,5 +1,21 @@
 {
-  "dependencies": {
-    "react-router-dom": "^6.21.3"
+  "name": "charrade",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.3.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
