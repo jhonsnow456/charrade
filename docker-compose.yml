@@ -1,0 +1,24 @@
+services:
+  server:
+    build: .
+    ports:
+      - '8080:8080'
+    environment:
+      - ADDR=:8080
+      - ROUND_DURATION=60s
+      - NEXT_ROUND_DELAY=4s
+  coturn:
+    image: coturn/coturn:latest
+    ports:
+      - '3478:3478/udp'
+      - '5349:5349/tcp'
+    command:
+      - '--listening-port=3478'
+      - '--tls-listening-port=5349'
+      - '--realm=charrade'
+      - '--server-name=charrade'
+      - '--lt-cred-mech'
+      - '--user=charrade:charrade'
+      - '--no-dtls'
+      - '--no-tlsv1'
+      - '--no-tlsv1p1'

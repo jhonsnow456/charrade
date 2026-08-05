@@ -1,0 +1,39 @@
+min_version: 1.5.7
+
+hooks:
+  pre-commit:
+    parallel: true
+    commands:
+      go-vet:
+        run: cd apps/backend && go vet ./...
+        glob: '*.go'
+      gofmt:
+        run: cd apps/backend && gofmt -w .
+        glob: '*.go'
+        stage_fixed: true
+      prettier:
+        run: pnpm format:check
+        glob: '*.{ts,tsx,js,jsx,css,json,yml}'
+      eslint:
+        run: pnpm --filter=web lint
+        glob: '*.{ts,tsx}'
+
+  commit-msg:
+    commands:
+      conventional:
+        run: |
+          head -1 {1} | grep -qE '^(feat|fix|chore|docs|style|refactor|perf|test|build|ci)(\(.+\))?: .+' || {
+            echo "Commit message must follow conventional format: type(scope): description"
+            echo "Types: feat, fix, chore, docs, style, refactor, perf, test, build, ci"
+            exit 1
+          }
+
+  pre-push:
+    parallel: true
+    commands:
+      go-test:
+        run: cd apps/backend && go test ./...
+        glob: '*.go'
+      vitest:
+        run: pnpm --filter=web test -- --run
+        glob: '*.{ts,tsx}'

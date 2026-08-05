@@ -54,8 +54,15 @@ This repo follows TDD. For any change:
 - Module path: `github.com/hey-amanthakur/charrade/apps/backend`
 - Stdlib-first. `net/http` + `gorilla/websocket` only; avoid heavyweight frameworks.
 - Package layout: `cmd/server` (entrypoint) + `internal/game` (pure game logic, no I/O) +
-  `internal/server` (HTTP/WS transport). Keep I/O out of `internal/game`.
-- Formatting: `gofmt` / `go vet` — never `go fmt` alternatives.
+  `internal/server` (HTTP/WS transport) + `internal/config` (env-driven configuration).
+  Keep I/O out of `internal/game`.
+- Within `internal/server`: `server.go` (wiring + New) | `handler.go` (HTTP handlers) |
+  `dispatch.go` (WS message routing + scheduling) | `signal.go` (WebRTC relay) |
+  `middleware.go` (CORS, health) | `hub.go` | `store.go` | `types.go`.
+- API routes are versioned under `/api/v1/`. Frontend base is `/api/v1`.
+- Formatting: `gofmt` / `go vet` — never `go fmt` alternatives. `golangci-lint` is
+  configured (`.golangci.yml`) and should be run before pushing.
+- Logging: use `log/slog` (structured logging). Never `log.Printf`.
 - Errors: wrap with context (`fmt.Errorf("...: %w", err)`); use `errors.Is`/`errors.As`.
 - JSON: field names `camelCase` via struct tags, matching the TS client types.
 
@@ -80,3 +87,8 @@ This repo follows TDD. For any change:
 - The Go binary and frontend dev server do not auto-restart under `pnpm dev`;
   use `go run` / Vite HMR as appropriate for iteration.
 - `packageManager` is pinned to `pnpm@9.12.3` in the root `package.json`.
+- Lefthook manages Git hooks (pre-commit, commit-msg, pre-push). See `lefthook.yml`.
+- `golangci-lint` is configured in `.golangci.yml`. Run it before pushing.
+- Config is loaded from env vars via `internal/config`. See `config.Config` for available
+  settings (`ADDR`, `ROUND_DURATION`, `NEXT_ROUND_DELAY`).
+- The server supports graceful shutdown on SIGINT/SIGTERM.

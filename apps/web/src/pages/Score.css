@@ -1,0 +1,125 @@
+.score {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-8) var(--space-4);
+  background: var(--color-bg);
+}
+
+.score-header {
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.score-title {
+  margin: 0 0 var(--space-3);
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-family: var(--font-display);
+  color: var(--color-fg);
+}
+
+.score-winners {
+  margin: 0;
+  font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.score-table {
+  width: 100%;
+  max-width: 480px;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.score-table th,
+.score-table td {
+  padding: var(--space-4);
+  text-align: left;
+}
+
+.score-table th {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+  background: var(--color-surface-2);
+  border-bottom: 2px solid var(--color-border);
+}
+
+.score-table tbody tr {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.score-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.score-table tbody tr.winner {
+  background: linear-gradient(90deg, var(--color-primary-bg) 0%, transparent 50%);
+}
+
+.score-player {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.score-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.score-col-score {
+  text-align: right;
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-family: var(--font-display);
+  color: var(--color-fg);
+}
+
+.score-footer {
+  margin-top: var(--space-8);
+}
+
+.score-home {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+  border: none;
+  border-radius: var(--radius-full);
+  text-decoration: none;
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.score-home:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.score-home:active {
+  transform: translateY(0);
+}
+
+.score-loading,
+.score-error {
+  text-align: center;
+  color: var(--color-muted);
+}
+
+.score-error p {
+  margin-bottom: var(--space-4);
+}

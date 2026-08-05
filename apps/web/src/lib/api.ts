@@ -1,6 +1,6 @@
 import { mapRoom, type Room } from './game';
 
-const API_BASE = '/api';
+const API_BASE = '/api/v1';
 
 export interface CreateRoomInput {
   name: string;

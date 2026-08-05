@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import PlayerList from '../components/PlayerList';
 import { useGame, type GameSession } from '../hooks/useGame';
@@ -21,6 +21,7 @@ function loadSession(roomId: string): GameSession | null {
 
 function Room() {
   const { roomId = '' } = useParams();
+  const navigate = useNavigate();
   const [session] = useState<GameSession | null>(() => loadSession(roomId));
   const signalRef = useRef<(from: string, payload: SignalPayload) => void>(() => {});
   const { state, send } = useGame(roomId, session, (message) =>
@@ -38,6 +39,11 @@ function Room() {
   useEffect(() => {
     signalRef.current = video.handleSignal;
   });
+  useEffect(() => {
+    if (state.room?.phase === 'finished') {
+      navigate(`/room/${state.room.id}/score`, { replace: true });
+    }
+  }, [state.room?.phase, state.room?.id, navigate]);
 
   if (!session) {
     return (
@@ -223,15 +229,7 @@ function PlayingView({
           {correct ? 'Someone got it!' : 'No correct guess this round.'}
         </p>
         {room.phase === 'finished' && (
-          <p className="round-final">The game is finished. Thanks for playing!</p>
-        )}
-        {isHost && room.phase !== 'finished' && (
-          <button className="stage-action" onClick={() => send({ type: 'startRound' })}>
-            Start next round
-          </button>
-        )}
-        {!isHost && room.phase !== 'finished' && (
-          <p className="lobby-waiting">Waiting for the host to start the next round…</p>
+          <p className="round-final">The game is finished. Redirecting to scores…</p>
         )}
       </motion.div>
     );

@@ -24,7 +24,7 @@ afterEach(() => {
 describe('wsUrl', () => {
   it('builds a websocket url from the current host', () => {
     expect(wsUrl('room-1', 'p1')).toBe(
-      `ws://${window.location.host}/api/rooms/room-1/ws?playerId=p1`,
+      `ws://${window.location.host}/api/v1/rooms/room-1/ws?playerId=p1`,
     );
   });
 });

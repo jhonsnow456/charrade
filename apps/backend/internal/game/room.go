@@ -1,60 +1,12 @@
 package game
 
 import (
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strings"
 	"time"
 )
 
-// Phase describes the lifecycle of a room.
-type Phase string
-
-const (
-	PhaseLobby    Phase = "lobby"
-	PhasePlaying  Phase = "playing"
-	PhaseFinished Phase = "finished"
-)
-
-var (
-	ErrGameInProgress      = errors.New("game already in progress")
-	ErrNotEnoughPlayers    = errors.New("need at least 2 players to start")
-	ErrPlayerNotFound      = errors.New("player not found")
-	ErrPlayerAlreadyInRoom = errors.New("player already in room")
-	ErrNoActiveRound       = errors.New("no active round")
-	ErrRoundAlreadyActive  = errors.New("a round is already active")
-	ErrRoundCompleted      = errors.New("round is already completed")
-	ErrActorCannotGuess    = errors.New("the actor cannot guess their own word")
-)
-
-// Player is a participant in a room.
-type Player struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Avatar string `json:"avatar"`
-	Score  int    `json:"score"`
-}
-
-// Guess is a single guess attempt submitted during a round.
-type Guess struct {
-	PlayerID string    `json:"playerId"`
-	Text     string    `json:"text"`
-	Correct  bool      `json:"correct"`
-	At       time.Time `json:"at"`
-}
-
-// Round is a single acting turn.
-type Round struct {
-	ActorID   string        `json:"actorId"`
-	Word      string        `json:"word"`
-	Duration  time.Duration `json:"duration"`
-	StartedAt time.Time     `json:"startedAt"`
-	Guesses   []Guess       `json:"guesses"`
-	Completed bool          `json:"completed"`
-}
-
-// Room holds players and the current game state.
 type Room struct {
 	ID      string    `json:"id"`
 	HostID  string    `json:"hostId"`
@@ -66,7 +18,6 @@ type Room struct {
 	now      func() time.Time
 }
 
-// NewRoom creates a room with a single host player in the lobby phase.
 func NewRoom(id string, host Player) *Room {
 	host.Score = 0
 	return &Room{
@@ -79,7 +30,6 @@ func NewRoom(id string, host Player) *Room {
 	}
 }
 
-// Player returns the player with the given ID.
 func (r *Room) Player(id string) (*Player, bool) {
 	for _, p := range r.Players {
 		if p.ID == id {
@@ -89,7 +39,6 @@ func (r *Room) Player(id string) (*Player, bool) {
 	return nil, false
 }
 
-// AddPlayer joins a new player to the room.
 func (r *Room) AddPlayer(p Player) error {
 	if r.Phase != PhaseLobby {
 		return fmt.Errorf("add player: %w", ErrGameInProgress)
@@ -102,8 +51,6 @@ func (r *Room) AddPlayer(p Player) error {
 	return nil
 }
 
-// RemovePlayer drops a player and, if they were host, transfers host to the
-// first remaining player.
 func (r *Room) RemovePlayer(id string) error {
 	idx := -1
 	for i, p := range r.Players {
@@ -122,7 +69,6 @@ func (r *Room) RemovePlayer(id string) error {
 	return nil
 }
 
-// Start moves the room from the lobby into the playing phase.
 func (r *Room) Start() error {
 	if r.Phase != PhaseLobby {
 		return fmt.Errorf("start: %w", ErrGameInProgress)
@@ -134,8 +80,6 @@ func (r *Room) Start() error {
 	return nil
 }
 
-// StartRound begins a new round with the given actor, drawing a word from the
-// word list. Only one round may be active at a time.
 func (r *Room) StartRound(actorID string, duration time.Duration) error {
 	if r.Phase != PhasePlaying {
 		return fmt.Errorf("start round: game not in progress")
@@ -156,8 +100,6 @@ func (r *Room) StartRound(actorID string, duration time.Duration) error {
 	return nil
 }
 
-// Guess submits a guess for the active round. A correct guess completes the
-// round and awards a point to the guesser and the actor.
 func (r *Room) Guess(playerID, text string) (bool, error) {
 	if r.Round == nil || r.Round.Completed {
 		return false, fmt.Errorf("guess: %w", ErrNoActiveRound)
@@ -187,7 +129,6 @@ func (r *Room) Guess(playerID, text string) (bool, error) {
 	return correct, nil
 }
 
-// EndRound marks the active round complete without awarding points.
 func (r *Room) EndRound() error {
 	if r.Round == nil || r.Round.Completed {
 		return fmt.Errorf("end round: %w", ErrRoundCompleted)
@@ -196,8 +137,6 @@ func (r *Room) EndRound() error {
 	return nil
 }
 
-// NextActorID returns the player that follows the given actor, cycling around
-// the player list.
 func (r *Room) NextActorID(currentID string) (string, error) {
 	for i, p := range r.Players {
 		if p.ID != currentID {
@@ -209,24 +148,6 @@ func (r *Room) NextActorID(currentID string) (string, error) {
 	return "", fmt.Errorf("next actor: %w", ErrPlayerNotFound)
 }
 
-// ViewFor returns a copy of the room safe to send to a given viewer. The
-// round word is blanked out for everyone except the actor so teammates cannot
-// see it.
-func (r *Room) ViewFor(viewerID string) Room {
-	out := *r
-	out.Players = r.Players
-	if r.Round != nil {
-		round := *r.Round
-		round.Guesses = append([]Guess{}, r.Round.Guesses...)
-		if viewerID != r.Round.ActorID {
-			round.Word = ""
-		}
-		out.Round = &round
-	}
-	return out
-}
-
-// Normalize lowercases and trims a guess so matches are forgiving.
 func Normalize(s string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(s))), " ")
 }

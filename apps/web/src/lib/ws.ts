@@ -40,7 +40,7 @@ class NativeSocket implements Socket {
 
 export function wsUrl(roomId: string, playerId: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${window.location.host}/api/rooms/${roomId}/ws?playerId=${playerId}`;
+  return `${protocol}://${window.location.host}/api/v1/rooms/${roomId}/ws?playerId=${playerId}`;
 }
 
 export interface GameClientOptions {

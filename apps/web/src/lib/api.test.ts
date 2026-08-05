@@ -25,7 +25,7 @@ describe('api', () => {
 
     expect(result).toEqual({ roomId: 'r1', playerId: 'p1', hostId: 'p1' });
     expect(fetch).toHaveBeenCalledWith(
-      '/api/rooms',
+      '/api/v1/rooms',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -39,7 +39,7 @@ describe('api', () => {
 
     await joinRoom('r1', { name: 'Bob', avatar: 'avatar-2' });
 
-    expect(fetch).toHaveBeenCalledWith('/api/rooms/r1/players', expect.anything());
+    expect(fetch).toHaveBeenCalledWith('/api/v1/rooms/r1/players', expect.anything());
   });
 
   it('getRoom maps the raw room state', async () => {

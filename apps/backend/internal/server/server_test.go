@@ -11,12 +11,22 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/hey-amanthakur/charrade/apps/backend/internal/config"
 	"github.com/hey-amanthakur/charrade/apps/backend/internal/game"
 )
 
+const apiV1 = "/api/v1"
+
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(New())
+	ts := httptest.NewServer(New(config.Default()))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func newTestServerWithConfig(t *testing.T, cfg config.Config) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(New(cfg))
 	t.Cleanup(ts.Close)
 	return ts
 }
@@ -44,7 +54,7 @@ func decodeJSON(t *testing.T, resp *http.Response, out any) {
 
 func TestCreateRoom(t *testing.T) {
 	ts := newTestServer(t)
-	resp := postJSON(t, ts.URL+"/api/rooms", createRoomRequest{Name: "Alice", Avatar: "avatar-1"})
+	resp := postJSON(t, ts.URL+apiV1+"/rooms", createRoomRequest{Name: "Alice", Avatar: "avatar-1"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", resp.StatusCode)
 	}
@@ -59,9 +69,28 @@ func TestCreateRoom(t *testing.T) {
 	}
 }
 
+func TestHealthCheck(t *testing.T) {
+	ts := newTestServer(t)
+	resp, err := http.Get(ts.URL + apiV1 + "/health")
+	if err != nil {
+		t.Fatalf("health check: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("health status = %q, want ok", body["status"])
+	}
+}
+
 func TestCreateRoomMissingName(t *testing.T) {
 	ts := newTestServer(t)
-	resp := postJSON(t, ts.URL+"/api/rooms", createRoomRequest{Avatar: "avatar-1"})
+	resp := postJSON(t, ts.URL+apiV1+"/rooms", createRoomRequest{Avatar: "avatar-1"})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -78,7 +107,7 @@ func TestRoomIDIsShareableCode(t *testing.T) {
 			t.Fatalf("roomID = %q, want lowercase hex", created.RoomID)
 		}
 	}
-	resp := postJSON(t, ts.URL+"/api/rooms/"+created.RoomID+"/players", createRoomRequest{
+	resp := postJSON(t, ts.URL+apiV1+"/rooms/"+created.RoomID+"/players", createRoomRequest{
 		Name: "Bob", Avatar: "avatar-2",
 	})
 	if resp.StatusCode != http.StatusCreated {
@@ -90,7 +119,7 @@ func TestGetRoom(t *testing.T) {
 	ts := newTestServer(t)
 	created := createRoomViaAPI(t, ts, "Alice")
 
-	resp, err := http.Get(ts.URL + "/api/rooms/" + created.RoomID)
+	resp, err := http.Get(ts.URL + apiV1 + "/rooms/" + created.RoomID)
 	if err != nil {
 		t.Fatalf("get room: %v", err)
 	}
@@ -110,7 +139,7 @@ func TestGetRoom(t *testing.T) {
 
 func TestGetRoomNotFound(t *testing.T) {
 	ts := newTestServer(t)
-	resp, err := http.Get(ts.URL + "/api/rooms/nope")
+	resp, err := http.Get(ts.URL + apiV1 + "/rooms/nope")
 	if err != nil {
 		t.Fatalf("get room: %v", err)
 	}
@@ -123,7 +152,7 @@ func TestAddPlayer(t *testing.T) {
 	ts := newTestServer(t)
 	created := createRoomViaAPI(t, ts, "Alice")
 
-	resp := postJSON(t, ts.URL+"/api/rooms/"+created.RoomID+"/players", createRoomRequest{
+	resp := postJSON(t, ts.URL+apiV1+"/rooms/"+created.RoomID+"/players", createRoomRequest{
 		Name: "Bob", Avatar: "avatar-2",
 	})
 	if resp.StatusCode != http.StatusCreated {
@@ -135,7 +164,7 @@ func TestAddPlayer(t *testing.T) {
 		t.Error("response playerID is empty")
 	}
 
-	getResp, _ := http.Get(ts.URL + "/api/rooms/" + created.RoomID)
+	getResp, _ := http.Get(ts.URL + apiV1 + "/rooms/" + created.RoomID)
 	var room stateMessage
 	decodeJSON(t, getResp, &room)
 	if len(room.Room.Players) != 2 {
@@ -145,7 +174,7 @@ func TestAddPlayer(t *testing.T) {
 
 func TestAddPlayerToMissingRoom(t *testing.T) {
 	ts := newTestServer(t)
-	resp := postJSON(t, ts.URL+"/api/rooms/nope/players", createRoomRequest{Name: "Bob"})
+	resp := postJSON(t, ts.URL+apiV1+"/rooms/nope/players", createRoomRequest{Name: "Bob"})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
@@ -154,13 +183,13 @@ func TestAddPlayerToMissingRoom(t *testing.T) {
 func TestAddPlayerAfterGameStarted(t *testing.T) {
 	ts := newTestServer(t)
 	host := createRoomViaAPI(t, ts, "Alice")
-	createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 	sendWS(t, hostConn, clientMessage{Type: "start"})
 	waitFor(t, hostConn, func(s stateMessage) bool { return s.Room.Phase == "playing" })
 
-	resp := postJSON(t, ts.URL+"/api/rooms/"+host.RoomID+"/players", createRoomRequest{
+	resp := postJSON(t, ts.URL+apiV1+"/rooms/"+host.RoomID+"/players", createRoomRequest{
 		Name: "Carol", Avatar: "avatar-3",
 	})
 	if resp.StatusCode != http.StatusConflict {
@@ -169,9 +198,11 @@ func TestAddPlayerAfterGameStarted(t *testing.T) {
 }
 
 func TestWebSocketFullRound(t *testing.T) {
-	ts := newTestServer(t)
+	cfg := config.Default()
+	cfg.RoundDuration = time.Hour
+	ts := newTestServerWithConfig(t, cfg)
 	host := createRoomViaAPI(t, ts, "Alice")
-	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	guesser := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
@@ -206,9 +237,11 @@ func TestWebSocketFullRound(t *testing.T) {
 }
 
 func TestStartBeginsFirstRound(t *testing.T) {
-	ts := newTestServer(t)
+	cfg := config.Default()
+	cfg.RoundDuration = time.Hour
+	ts := newTestServerWithConfig(t, cfg)
 	host := createRoomViaAPI(t, ts, "Alice")
-	createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 
@@ -222,10 +255,12 @@ func TestStartBeginsFirstRound(t *testing.T) {
 }
 
 func TestAutoAdvanceAfterTimeout(t *testing.T) {
-	setRoundTimings(t, 100*time.Millisecond, 100*time.Millisecond)
-	ts := newTestServer(t)
+	cfg := config.Default()
+	cfg.RoundDuration = 100 * time.Millisecond
+	cfg.NextRoundDelay = 100 * time.Millisecond
+	ts := newTestServerWithConfig(t, cfg)
 	host := createRoomViaAPI(t, ts, "Alice")
-	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	guesser := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
@@ -248,10 +283,12 @@ func TestAutoAdvanceAfterTimeout(t *testing.T) {
 }
 
 func TestAutoAdvanceAfterCorrectGuess(t *testing.T) {
-	setRoundTimings(t, time.Hour, 100*time.Millisecond)
-	ts := newTestServer(t)
+	cfg := config.Default()
+	cfg.RoundDuration = time.Hour
+	cfg.NextRoundDelay = 100 * time.Millisecond
+	ts := newTestServerWithConfig(t, cfg)
 	host := createRoomViaAPI(t, ts, "Alice")
-	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	guesser := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
@@ -276,10 +313,12 @@ func TestAutoAdvanceAfterCorrectGuess(t *testing.T) {
 }
 
 func TestAutoAdvanceAfterHostEndsRound(t *testing.T) {
-	setRoundTimings(t, time.Hour, 100*time.Millisecond)
-	ts := newTestServer(t)
+	cfg := config.Default()
+	cfg.RoundDuration = time.Hour
+	cfg.NextRoundDelay = 100 * time.Millisecond
+	ts := newTestServerWithConfig(t, cfg)
 	host := createRoomViaAPI(t, ts, "Alice")
-	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	guesser := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
@@ -306,7 +345,7 @@ func TestAutoAdvanceAfterHostEndsRound(t *testing.T) {
 func TestPlayerRemovedOnDisconnect(t *testing.T) {
 	ts := newTestServer(t)
 	host := createRoomViaAPI(t, ts, "Alice")
-	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	guesser := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
@@ -322,7 +361,7 @@ func TestPlayerRemovedOnDisconnect(t *testing.T) {
 func TestGameEndsWhenPlayersDropBelowTwo(t *testing.T) {
 	ts := newTestServer(t)
 	host := createRoomViaAPI(t, ts, "Alice")
-	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+	guesser := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+host.RoomID+"/players")
 
 	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
 	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
@@ -338,21 +377,9 @@ func TestGameEndsWhenPlayersDropBelowTwo(t *testing.T) {
 	}
 }
 
-func setRoundTimings(t *testing.T, duration, delay time.Duration) {
-	t.Helper()
-	oldDuration := roundDuration
-	oldDelay := nextRoundDelay
-	roundDuration = duration
-	nextRoundDelay = delay
-	t.Cleanup(func() {
-		roundDuration = oldDuration
-		nextRoundDelay = oldDelay
-	})
-}
-
 func createRoomViaAPI(t *testing.T, ts *httptest.Server, name string, path ...string) createRoomResponse {
 	t.Helper()
-	p := "/api/rooms"
+	p := apiV1 + "/rooms"
 	if len(path) > 0 {
 		p = path[0]
 	}
@@ -367,7 +394,7 @@ func createRoomViaAPI(t *testing.T, ts *httptest.Server, name string, path ...st
 
 func dialWS(t *testing.T, ts *httptest.Server, roomID, playerID string) *websocket.Conn {
 	t.Helper()
-	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/rooms/" + roomID + "/ws?playerId=" + playerID
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + apiV1 + "/rooms/" + roomID + "/ws?playerId=" + playerID
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		t.Fatalf("dial ws: %v", err)
@@ -406,7 +433,7 @@ func waitFor(t *testing.T, conn *websocket.Conn, pred func(stateMessage) bool) s
 func TestWebSocketSignalRelay(t *testing.T) {
 	ts := newTestServer(t)
 	actor := createRoomViaAPI(t, ts, "Alice")
-	viewer := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+actor.RoomID+"/players")
+	viewer := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+actor.RoomID+"/players")
 
 	actorConn := dialWS(t, ts, actor.RoomID, actor.PlayerID)
 	viewerConn := dialWS(t, ts, actor.RoomID, viewer.PlayerID)
@@ -433,7 +460,7 @@ func TestWebSocketSignalRelay(t *testing.T) {
 func TestWebSocketAcceptsLargeSignal(t *testing.T) {
 	ts := newTestServer(t)
 	actor := createRoomViaAPI(t, ts, "Alice")
-	viewer := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+actor.RoomID+"/players")
+	viewer := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+actor.RoomID+"/players")
 
 	actorConn := dialWS(t, ts, actor.RoomID, actor.PlayerID)
 	viewerConn := dialWS(t, ts, actor.RoomID, viewer.PlayerID)
@@ -478,7 +505,7 @@ func TestWebSocketSignalToMissingPlayer(t *testing.T) {
 func TestWebSocketSignalToDisconnectedPlayer(t *testing.T) {
 	ts := newTestServer(t)
 	actor := createRoomViaAPI(t, ts, "Alice")
-	offline := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+actor.RoomID+"/players")
+	offline := createRoomViaAPI(t, ts, "Bob", apiV1+"/rooms/"+actor.RoomID+"/players")
 
 	actorConn := dialWS(t, ts, actor.RoomID, actor.PlayerID)
 

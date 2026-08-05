@@ -15,11 +15,6 @@ const (
 	maxMessageSize = 64 * 1024
 )
 
-var (
-	roundDuration  = 60 * time.Second
-	nextRoundDelay = 4 * time.Second
-)
-
 // createRoomRequest is the JSON body for room creation and joining.
 type createRoomRequest struct {
 	Name   string `json:"name"`
