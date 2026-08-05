@@ -1,0 +1,103 @@
+@font-face {
+  font-family: 'Fredoka';
+  src: url('./fonts/Fredoka/fredoka-latin.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito';
+  src: url('./fonts/Nunito/nunito-latin.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --color-primary: #e11d48;
+  --color-primary-strong: #be123c;
+  --color-on-primary: #ffffff;
+  --color-secondary: #fb7185;
+  --color-accent: #2563eb;
+  --color-bg: #fff1f2;
+  --color-surface: #ffffff;
+  --color-fg: #881337;
+  --color-fg-muted: #9f1239;
+  --color-fg-subtle: #be123c;
+  --color-border: #fecdd3;
+  --color-muted: #f0ecf2;
+  --color-success: #15803d;
+  --color-destructive: #c02727;
+  --color-ring: #e11d48;
+
+  --font-display: 'Fredoka', 'Nunito', system-ui, sans-serif;
+  --font-body: 'Nunito', system-ui, sans-serif;
+
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 28px;
+  --radius-full: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(136, 19, 55, 0.08);
+  --shadow-md: 0 8px 24px rgba(136, 19, 55, 0.12);
+  --shadow-lg: 0 16px 48px rgba(136, 19, 55, 0.18);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
+  --space-10: 64px;
+
+  color: var(--color-fg);
+  background: var(--color-bg);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
