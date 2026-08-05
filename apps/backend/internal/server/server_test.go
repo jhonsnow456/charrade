@@ -177,12 +177,8 @@ func TestWebSocketFullRound(t *testing.T) {
 	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
 
 	sendWS(t, hostConn, clientMessage{Type: "start"})
-	waitFor(t, hostConn, func(s stateMessage) bool { return s.Room.Phase == "playing" })
-	waitFor(t, guesserConn, func(s stateMessage) bool { return s.Room.Phase == "playing" })
-
-	sendWS(t, hostConn, clientMessage{Type: "startRound"})
 	hostView := waitFor(t, hostConn, func(s stateMessage) bool {
-		return s.Room.Round != nil && !s.Room.Round.Completed
+		return s.Room.Phase == "playing" && s.Room.Round != nil && !s.Room.Round.Completed
 	})
 	if hostView.Room.Round.Word == "" {
 		t.Fatal("host (actor) should see the round word")
@@ -207,6 +203,151 @@ func TestWebSocketFullRound(t *testing.T) {
 	if hostPlayer.Score != 1 {
 		t.Errorf("host score = %d, want 1", hostPlayer.Score)
 	}
+}
+
+func TestStartBeginsFirstRound(t *testing.T) {
+	ts := newTestServer(t)
+	host := createRoomViaAPI(t, ts, "Alice")
+	createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+
+	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
+
+	sendWS(t, hostConn, clientMessage{Type: "start"})
+	view := waitFor(t, hostConn, func(s stateMessage) bool {
+		return s.Room.Phase == "playing" && s.Room.Round != nil && !s.Room.Round.Completed
+	})
+	if view.Room.Round.ActorID != host.PlayerID {
+		t.Errorf("first round actor = %q, want host %q", view.Room.Round.ActorID, host.PlayerID)
+	}
+}
+
+func TestAutoAdvanceAfterTimeout(t *testing.T) {
+	setRoundTimings(t, 100*time.Millisecond, 100*time.Millisecond)
+	ts := newTestServer(t)
+	host := createRoomViaAPI(t, ts, "Alice")
+	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+
+	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
+	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
+
+	sendWS(t, hostConn, clientMessage{Type: "start"})
+	first := waitFor(t, hostConn, func(s stateMessage) bool {
+		return s.Room.Round != nil && !s.Room.Round.Completed
+	})
+	firstActor := first.Room.Round.ActorID
+
+	next := waitFor(t, guesserConn, func(s stateMessage) bool {
+		if s.Room.Round == nil {
+			return false
+		}
+		return s.Room.Round.ActorID != firstActor && !s.Room.Round.Completed
+	})
+	if next.Room.Round.ActorID == firstActor {
+		t.Fatal("round did not advance to a new actor after timeout")
+	}
+}
+
+func TestAutoAdvanceAfterCorrectGuess(t *testing.T) {
+	setRoundTimings(t, time.Hour, 100*time.Millisecond)
+	ts := newTestServer(t)
+	host := createRoomViaAPI(t, ts, "Alice")
+	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+
+	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
+	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
+
+	sendWS(t, hostConn, clientMessage{Type: "start"})
+	view := waitFor(t, hostConn, func(s stateMessage) bool {
+		return s.Room.Round != nil && !s.Room.Round.Completed
+	})
+	firstActor := view.Room.Round.ActorID
+
+	sendWS(t, guesserConn, clientMessage{Type: "guess", Text: view.Room.Round.Word})
+
+	next := waitFor(t, guesserConn, func(s stateMessage) bool {
+		if s.Room.Round == nil {
+			return false
+		}
+		return s.Room.Round.ActorID != firstActor && !s.Room.Round.Completed
+	})
+	if next.Room.Round.ActorID == firstActor {
+		t.Fatal("round did not advance after a correct guess")
+	}
+}
+
+func TestAutoAdvanceAfterHostEndsRound(t *testing.T) {
+	setRoundTimings(t, time.Hour, 100*time.Millisecond)
+	ts := newTestServer(t)
+	host := createRoomViaAPI(t, ts, "Alice")
+	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+
+	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
+	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
+
+	sendWS(t, hostConn, clientMessage{Type: "start"})
+	first := waitFor(t, hostConn, func(s stateMessage) bool {
+		return s.Room.Round != nil && !s.Room.Round.Completed
+	})
+	firstActor := first.Room.Round.ActorID
+
+	sendWS(t, hostConn, clientMessage{Type: "endRound"})
+
+	next := waitFor(t, guesserConn, func(s stateMessage) bool {
+		if s.Room.Round == nil {
+			return false
+		}
+		return s.Room.Round.ActorID != firstActor && !s.Room.Round.Completed
+	})
+	if next.Room.Round.ActorID == firstActor {
+		t.Fatal("round did not advance after the host ended it")
+	}
+}
+
+func TestPlayerRemovedOnDisconnect(t *testing.T) {
+	ts := newTestServer(t)
+	host := createRoomViaAPI(t, ts, "Alice")
+	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+
+	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
+	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
+	waitFor(t, hostConn, func(s stateMessage) bool { return len(s.Room.Players) == 2 })
+
+	guesserConn.Close()
+	view := waitFor(t, hostConn, func(s stateMessage) bool { return len(s.Room.Players) == 1 })
+	if _, ok := findPlayer(view.Room.Players, guesser.PlayerID); ok {
+		t.Error("disconnected guesser still in players list")
+	}
+}
+
+func TestGameEndsWhenPlayersDropBelowTwo(t *testing.T) {
+	ts := newTestServer(t)
+	host := createRoomViaAPI(t, ts, "Alice")
+	guesser := createRoomViaAPI(t, ts, "Bob", "/api/rooms/"+host.RoomID+"/players")
+
+	hostConn := dialWS(t, ts, host.RoomID, host.PlayerID)
+	guesserConn := dialWS(t, ts, host.RoomID, guesser.PlayerID)
+
+	sendWS(t, hostConn, clientMessage{Type: "start"})
+	waitFor(t, hostConn, func(s stateMessage) bool { return s.Room.Phase == "playing" })
+	waitFor(t, guesserConn, func(s stateMessage) bool { return s.Room.Phase == "playing" })
+
+	guesserConn.Close()
+	view := waitFor(t, hostConn, func(s stateMessage) bool { return s.Room.Phase == "finished" })
+	if len(view.Room.Players) != 1 {
+		t.Errorf("players after disconnect = %d, want 1", len(view.Room.Players))
+	}
+}
+
+func setRoundTimings(t *testing.T, duration, delay time.Duration) {
+	t.Helper()
+	oldDuration := roundDuration
+	oldDelay := nextRoundDelay
+	roundDuration = duration
+	nextRoundDelay = delay
+	t.Cleanup(func() {
+		roundDuration = oldDuration
+		nextRoundDelay = oldDelay
+	})
 }
 
 func createRoomViaAPI(t *testing.T, ts *httptest.Server, name string, path ...string) createRoomResponse {

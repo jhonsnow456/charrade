@@ -76,8 +76,9 @@ func (c *Client) sendBestEffort(msg []byte) {
 	}
 }
 
-func (c *Client) readPump(roomID string, handle func(*Client, clientMessage) error) {
+func (c *Client) readPump(roomID string, handle func(*Client, clientMessage) error, onDisconnect func()) {
 	defer func() {
+		onDisconnect()
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)

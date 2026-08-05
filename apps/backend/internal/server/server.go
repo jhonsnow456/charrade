@@ -4,12 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/hey-amanthakur/charrade/apps/backend/internal/game"
@@ -22,19 +23,20 @@ var (
 	}
 )
 
-// Server wires the HTTP routes and WebSocket hub together.
 type Server struct {
-	store *RoomStore
-	hub   *Hub
-	newID func() string
+	store    *RoomStore
+	hub      *Hub
+	newID    func() string
+	guardsMu sync.Mutex
+	guards   map[string]*sync.Mutex
 }
 
-// New returns the fully configured HTTP handler.
 func New() http.Handler {
 	s := &Server{
-		store: NewRoomStore(),
-		hub:   NewHub(),
-		newID: randomID,
+		store:  NewRoomStore(),
+		hub:    NewHub(),
+		newID:  randomID,
+		guards: make(map[string]*sync.Mutex),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/rooms", s.handleCreateRoom)
@@ -82,11 +84,12 @@ func (s *Server) handleAddPlayer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errMessage(err.Error()))
 		return
 	}
-	if err := s.store.Join(roomID, &player); err != nil {
+	g := s.roomGuard(roomID)
+	g.Lock()
+	err = s.store.Join(roomID, &player)
+	g.Unlock()
+	if err != nil {
 		status := http.StatusConflict
-		if errors.Is(err, game.ErrGameInProgress) {
-			status = http.StatusConflict
-		}
 		writeJSON(w, status, errMessage(err.Error()))
 		return
 	}
@@ -99,12 +102,18 @@ func (s *Server) handleAddPlayer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetRoom(w http.ResponseWriter, r *http.Request) {
-	room, ok := s.store.Get(r.PathValue("id"))
+	roomID := r.PathValue("id")
+	g := s.roomGuard(roomID)
+	g.Lock()
+	room, ok := s.store.Get(roomID)
 	if !ok {
+		g.Unlock()
 		writeJSON(w, http.StatusNotFound, errMessage("room not found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, stateFor(room))
+	msg := stateFor(room)
+	g.Unlock()
+	writeJSON(w, http.StatusOK, msg)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -141,12 +150,17 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.broadcastState(roomID)
 		}
 		return err
+	}, func() {
+		s.hub.Leave(roomID, client)
+		s.handlePlayerDisconnect(roomID, client.playerID)
 	})
 }
 
-// dispatch processes an inbound message. The first return value reports
-// whether a room state broadcast should follow a successful action.
 func (s *Server) dispatch(roomID string, c *Client, msg clientMessage) (bool, error) {
+	g := s.roomGuard(roomID)
+	g.Lock()
+	defer g.Unlock()
+
 	room, ok := s.store.Get(roomID)
 	if !ok {
 		return false, fmt.Errorf("room not found")
@@ -154,9 +168,21 @@ func (s *Server) dispatch(roomID string, c *Client, msg clientMessage) (bool, er
 
 	switch msg.Type {
 	case "start":
-		return s.requireHost(room, c, room.Start)
+		hosted, err := s.requireHost(room, c, func() error {
+			if err := room.Start(); err != nil {
+				return err
+			}
+			if err := room.StartRound(room.HostID, roundDuration); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err == nil && hosted {
+			s.scheduleRoundDeadline(roomID, room.Round.StartedAt)
+		}
+		return hosted, err
 	case "startRound":
-		return s.requireHost(room, c, func() error {
+		hosted, err := s.requireHost(room, c, func() error {
 			actorID := room.HostID
 			if room.Round != nil && room.Round.Completed {
 				next, err := room.NextActorID(room.Round.ActorID)
@@ -167,8 +193,16 @@ func (s *Server) dispatch(roomID string, c *Client, msg clientMessage) (bool, er
 			}
 			return room.StartRound(actorID, roundDuration)
 		})
+		if err == nil && hosted {
+			s.scheduleRoundDeadline(roomID, room.Round.StartedAt)
+		}
+		return hosted, err
 	case "endRound":
-		return s.requireHost(room, c, room.EndRound)
+		hosted, err := s.requireHost(room, c, room.EndRound)
+		if err == nil && hosted {
+			s.scheduleNextRound(roomID)
+		}
+		return hosted, err
 	case "guess":
 		if msg.Text == "" {
 			return false, fmt.Errorf("guess text is empty")
@@ -178,6 +212,9 @@ func (s *Server) dispatch(roomID string, c *Client, msg clientMessage) (bool, er
 			return false, err
 		}
 		log.Printf("room %s: %s guessed %q correct=%v", roomID, c.playerID, msg.Text, correct)
+		if correct {
+			s.scheduleNextRound(roomID)
+		}
 		return true, nil
 	case "signal":
 		return false, s.relaySignal(room, c, msg)
@@ -217,14 +254,116 @@ func (s *Server) relaySignal(room *game.Room, c *Client, msg clientMessage) erro
 	return nil
 }
 
+func (s *Server) scheduleRoundDeadline(roomID string, startedAt time.Time) {
+	delay := time.Until(startedAt.Add(roundDuration))
+	if delay < 0 {
+		delay = 0
+	}
+	time.AfterFunc(delay, func() {
+		ended := false
+		s.withRoomLock(roomID, func(room *game.Room) {
+			if room.Round == nil || room.Round.Completed || !room.Round.StartedAt.Equal(startedAt) {
+				return
+			}
+			if err := room.EndRound(); err == nil {
+				ended = true
+			}
+		})
+		if ended {
+			s.scheduleNextRound(roomID)
+		}
+		s.broadcastState(roomID)
+	})
+}
+
+func (s *Server) scheduleNextRound(roomID string) {
+	time.AfterFunc(nextRoundDelay, func() {
+		s.withRoomLock(roomID, func(room *game.Room) {
+			if room.Phase != game.PhasePlaying {
+				return
+			}
+			if room.Round == nil || !room.Round.Completed {
+				return
+			}
+			next, err := room.NextActorID(room.Round.ActorID)
+			if err != nil {
+				return
+			}
+			if err := room.StartRound(next, roundDuration); err != nil {
+				return
+			}
+			s.scheduleRoundDeadline(roomID, room.Round.StartedAt)
+		})
+		s.broadcastState(roomID)
+	})
+}
+
+func (s *Server) handlePlayerDisconnect(roomID, playerID string) {
+	changed := false
+	s.withRoomLock(roomID, func(room *game.Room) {
+		if room.Phase == game.PhaseFinished {
+			return
+		}
+		if s.hub.Find(roomID, playerID) != nil {
+			return
+		}
+		wasActor := room.Round != nil && room.Round.ActorID == playerID && !room.Round.Completed
+		if err := room.RemovePlayer(playerID); err != nil {
+			return
+		}
+		changed = true
+		if wasActor {
+			if err := room.EndRound(); err == nil {
+				s.scheduleNextRound(roomID)
+			}
+		}
+		if room.Phase == game.PhasePlaying && len(room.Players) < 2 {
+			room.Phase = game.PhaseFinished
+		}
+	})
+	if changed {
+		s.broadcastState(roomID)
+	}
+}
+
 func (s *Server) broadcastState(roomID string) {
+	g := s.roomGuard(roomID)
+	g.Lock()
 	room, ok := s.store.Get(roomID)
 	if !ok {
+		g.Unlock()
 		return
 	}
+	type outbound struct {
+		client *Client
+		msg    []byte
+	}
+	msgs := make([]outbound, 0, 4)
 	for _, client := range s.hub.Clients(roomID) {
 		view := room.ViewFor(client.playerID)
-		client.sendBestEffort(mustJSON(stateMessage{Type: "state", Room: view}))
+		msgs = append(msgs, outbound{client, mustJSON(stateMessage{Type: "state", Room: view})})
+	}
+	g.Unlock()
+	for _, m := range msgs {
+		m.client.sendBestEffort(m.msg)
+	}
+}
+
+func (s *Server) roomGuard(roomID string) *sync.Mutex {
+	s.guardsMu.Lock()
+	defer s.guardsMu.Unlock()
+	if s.guards[roomID] == nil {
+		s.guards[roomID] = &sync.Mutex{}
+	}
+	return s.guards[roomID]
+}
+
+func (s *Server) withRoomLock(roomID string, fn func(*game.Room)) {
+	g := s.roomGuard(roomID)
+	g.Lock()
+	defer g.Unlock()
+	if room, ok := s.store.Get(roomID); ok {
+		fn(room)
 	}
 }
 

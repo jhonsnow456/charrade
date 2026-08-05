@@ -8,12 +8,16 @@ import (
 )
 
 const (
-	roundDuration  = 60 * time.Second
 	sendBuffer     = 64
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = pongWait * 9 / 10
 	maxMessageSize = 64 * 1024
+)
+
+var (
+	roundDuration  = 60 * time.Second
+	nextRoundDelay = 4 * time.Second
 )
 
 // createRoomRequest is the JSON body for room creation and joining.
